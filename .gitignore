@@ -1,0 +1,10 @@
+/vendor/
+/state/
+/config/config.php
+/config/config_tg1.php
+/.env
+/.env.*
+!/.env.example
+/.vercel/
+/.agents/
+*.code-workspace

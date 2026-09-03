@@ -1,0 +1,13 @@
+{
+    "name": "pat/velodrome-auto-rebalance",
+    "description": "Velodrome Auto Rebalance Bot",
+    "type": "project",
+    "require": {
+        "guzzlehttp/guzzle": "^7.15"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    }
+}
