@@ -6,6 +6,7 @@ include __DIR__ . '/config/config_tg1.php';
 
 require __DIR__ . '/vendor/autoload.php';
 
+use App\Contracts\StateStoreInterface;
 use App\Constants\Token;
 use App\Contracts\ERC20Contract;
 use App\Contracts\FactoryContract;
@@ -14,17 +15,34 @@ use App\Contracts\PoolContract;
 use App\Contracts\PositionManagerContract;
 use App\Services\ContractService;
 use App\Services\DefiLlamaPriceService;
+use App\Services\LocalFileStateStore;
+use App\Services\UpstashRedisStateStore;
 use App\Services\PositionInitialValueService;
 use App\Services\RpcService;
 use App\Utils\AbiDecoder;
 use App\Utils\PositionValueCalculator;
 
 $config = require __DIR__ . '/config/config.php';
+$runtimeMode = getenv('RUNTIME_MODE') ?: 'server';
 $notificationsEnabled = filter_var(
     getenv('NOTIFICATIONS_ENABLED') ?: 'true',
     FILTER_VALIDATE_BOOL
 );
 $priceService = new DefiLlamaPriceService();
+
+/**
+ * Create appropriate StateStore based on runtime mode.
+ */
+function createStateStore(string $runtimeMode, string $stateDirectory): StateStoreInterface
+{
+    if ($runtimeMode === 'vercel') {
+        // Vercel mode requires Upstash Redis for persistent state
+        return new UpstashRedisStateStore();
+    }
+
+    // Default to server mode with local file storage
+    return new LocalFileStateStore($stateDirectory);
+}
 
 $chains = $config['chains'];
 
@@ -37,8 +55,7 @@ function cleanupWithdrawnPositionStates(
     string $stateDirectory,
     int $chainId,
     array $stakedPositionKeys
-): void
-{
+): void {
     foreach (glob($stateDirectory . DIRECTORY_SEPARATOR . $chainId . '-*.out-of-range') ?: [] as $stateFile) {
         $fileName = basename($stateFile);
 
@@ -52,7 +69,6 @@ function cleanupWithdrawnPositionStates(
             unlink($stateFile);
         }
     }
-
 }
 
 foreach ($chains as $chainName => $chain) {
@@ -62,6 +78,7 @@ foreach ($chains as $chainName => $chain) {
 
     $rpcService = new RpcService(['rpc' => $chain['rpc']]);
     $stateDirectory = __DIR__ . '/state';
+    $stateStore = createStateStore($runtimeMode, $stateDirectory);
     $initialValueService = isset($chain['position_history'])
         ? new PositionInitialValueService(
             $rpcService,
@@ -277,15 +294,13 @@ foreach ($chains as $chainName => $chain) {
             echo $rewardLine . '<br>';
             echo $inRange ? '<b>🟢 IN RANGE</b><hr>' : '<b>🔴 OUT OF RANGE</b><hr>';
 
-            $stateFile = $stateDirectory . DIRECTORY_SEPARATOR
-                . stateKey($chain['chain_id'], $positionManagerAddress, $positionId)
-                . '.out-of-range';
+            $stateKey = stateKey($chain['chain_id'], $positionManagerAddress, $positionId) . '.out-of-range';
 
-            if (!$inRange && !file_exists($stateFile) && $notificationsEnabled) {
-                if (!is_dir($stateDirectory) && !mkdir($stateDirectory, 0700, true) && !is_dir($stateDirectory)) {
-                    throw new RuntimeException('Unable to create notification state directory.');
-                }
-
+            // Only send notification if:
+            // 1. Position is out of range
+            // 2. We haven't notified for this position before (via stateStore)
+            // 3. Notifications are enabled
+            if (!$inRange && !$stateStore->exists($stateKey) && $notificationsEnabled) {
                 sendNotify2(sprintf(
                     "Out of range: [%s] %s%s%sCurrent Value: %s%s%s%s%s%s",
                     strtoupper($chainName),
@@ -299,11 +314,12 @@ foreach ($chains as $chainName => $chain) {
                     PHP_EOL,
                     $rewardLine
                 ));
-                file_put_contents($stateFile, sprintf('pair=%s%sgauge=%s%s', $tokenPair, PHP_EOL, $gaugeAddress, PHP_EOL));
+                $stateStore->write($stateKey, sprintf('pair=%s%sgauge=%s%s', $tokenPair, PHP_EOL, $gaugeAddress, PHP_EOL));
             }
 
-            if ($inRange && file_exists($stateFile)) {
-                unlink($stateFile);
+            // Clear state when position is back in range
+            if ($inRange && $stateStore->exists($stateKey)) {
+                $stateStore->delete($stateKey);
             }
         }
     }

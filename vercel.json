@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "functions": {
+    "api/cron/monitor.php": {
+      "runtime": "vercel-php"
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/cron/monitor",
+      "dest": "/api/cron/monitor.php"
+    }
+  ]
+}
