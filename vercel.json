@@ -1,1 +1,26 @@
-{"version": 2, "functions": {"api/**/*.php": {"runtime": "vercel-php@0.6.2"}, "index.php": {"runtime": "vercel-php@0.6.2"}}, "routes": [{"src": "/api/cron/monitor", "dest": "/api/cron/monitor.php"}]}
+{
+  "version": 2,
+  "functions": {
+    "api/**/*.php": {
+      "runtime": "vercel-php@0.6.2"
+    }
+  },
+  "routes": [
+    {
+      "src": "/",
+      "dest": "/404"
+    },
+    {
+      "src": "/index.php",
+      "dest": "/404"
+    },
+    {
+      "src": "/monitor",
+      "dest": "/api/web-monitor.php"
+    },
+    {
+      "src": "/api/cron/monitor",
+      "dest": "/api/cron/monitor.php"
+    }
+  ]
+}
