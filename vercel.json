@@ -8,13 +8,11 @@
   "routes": [
     {
       "src": "/",
-      "status": 404,
-      "dest": "/"
+      "status": 403
     },
     {
       "src": "/index.php",
-      "status": 404,
-      "dest": "/"
+      "status": 403
     },
     {
       "src": "/monitor",
