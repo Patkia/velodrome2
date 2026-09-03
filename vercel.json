@@ -8,10 +8,12 @@
   "routes": [
     {
       "src": "/",
+      "dest": "/forbidden.txt",
       "status": 403
     },
     {
       "src": "/index.php",
+      "dest": "/forbidden.txt",
       "status": 403
     },
     {
