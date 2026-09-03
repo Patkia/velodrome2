@@ -7,30 +7,11 @@ declare(strict_types=1);
  * 
  * Requires CRON_SECRET in Authorization header:
  * Authorization: Bearer <CRON_SECRET>
+ * 
+ * Vercel mode: Uses environment variables only (no local config files)
+ * Server mode: Uses local config files as before
  */
 
-declare(strict_types=1);
-
-require_once __DIR__ . '/../../config/config_tg1.php';
-require_once __DIR__ . '/../../vendor/autoload.php';
-
-use App\Contracts\StateStoreInterface;
-use App\Constants\Token;
-use App\Contracts\ERC20Contract;
-use App\Contracts\FactoryContract;
-use App\Contracts\GaugeContract;
-use App\Contracts\PoolContract;
-use App\Contracts\PositionManagerContract;
-use App\Services\ContractService;
-use App\Services\DefiLlamaPriceService;
-use App\Services\LocalFileStateStore;
-use App\Services\UpstashRedisStateStore;
-use App\Services\PositionInitialValueService;
-use App\Services\RpcService;
-use App\Utils\AbiDecoder;
-use App\Utils\PositionValueCalculator;
-
-// CORS headers for Vercel
 header('Content-Type: application/json');
 
 /**
@@ -44,7 +25,7 @@ function jsonResponse(int $status, array $data): never
 }
 
 /**
- * Validate CRON_SECRET header.
+ * Validate CRON_SECRET header - called BEFORE config loading.
  */
 function validateCronAuth(): void
 {
@@ -77,6 +58,154 @@ function validateCronAuth(): void
     }
 }
 
+// Validate auth FIRST before loading any configs
+validateCronAuth();
+
+// Now load composer autoload
+require_once __DIR__ . '/../../vendor/autoload.php';
+
+use App\Contracts\StateStoreInterface;
+use App\Constants\Token;
+use App\Contracts\ERC20Contract;
+use App\Contracts\FactoryContract;
+use App\Contracts\GaugeContract;
+use App\Contracts\PoolContract;
+use App\Contracts\PositionManagerContract;
+use App\Services\ContractService;
+use App\Services\DefiLlamaPriceService;
+use App\Services\LocalFileStateStore;
+use App\Services\UpstashRedisStateStore;
+use App\Services\PositionInitialValueService;
+use App\Services\RpcService;
+use App\Utils\AbiDecoder;
+use App\Utils\PositionValueCalculator;
+
+$runtimeMode = getenv('RUNTIME_MODE') ?: 'server';
+$stateDirectory = __DIR__ . '/../../state';
+
+/**
+ * Build config from environment variables (Vercel mode).
+ */
+function buildConfigFromEnv(): array
+{
+    $walletAddress = getenv('WALLET_ADDRESS');
+    $optimismRpcUrl = getenv('OPTIMISM_RPC_URL');
+    
+    if ($walletAddress === false || $walletAddress === '') {
+        throw new \RuntimeException('WALLET_ADDRESS environment variable is required');
+    }
+    
+    if ($optimismRpcUrl === false || $optimismRpcUrl === '') {
+        throw new \RuntimeException('OPTIMISM_RPC_URL environment variable is required');
+    }
+    
+    return [
+        'wallet' => [
+            'address' => $walletAddress,
+        ],
+        'chains' => [
+            'optimism' => [
+                'chain_id' => 10,
+                'price_chain' => 'optimism',
+                'position_history' => [
+                    'type' => 'blockscout',
+                    'url' => 'https://optimism.blockscout.com',
+                ],
+                'rpc' => [
+                    'url' => $optimismRpcUrl,
+                ],
+                'contracts' => [
+                    'position_manager' => \App\Constants\Contract::POSITION_MANAGER_V1,
+                    'factory' => \App\Constants\Contract::CL_FACTORY_V1,
+                    'gauges' => \App\Constants\Contract::GAUGES,
+                ],
+            ],
+            'celo' => [
+                'chain_id' => \App\Constants\Contract::CELO_CHAIN_ID,
+                'price_chain' => 'celo',
+                'position_history' => [
+                    'type' => 'blockscout',
+                    'url' => 'https://celo.blockscout.com',
+                ],
+                'rpc' => [
+                    'url' => 'https://forno.celo.org',
+                ],
+                'contracts' => [
+                    'position_manager' => \App\Constants\Contract::CELO_POSITION_MANAGER,
+                    'factory' => \App\Constants\Contract::CELO_CL_FACTORY,
+                    'gauges' => \App\Constants\Contract::CELO_GAUGES,
+                ],
+            ],
+            'soneium' => [
+                'chain_id' => \App\Constants\Contract::SONEIUM_CHAIN_ID,
+                'price_chain' => 'soneium',
+                'position_history' => [
+                    'type' => 'blockscout',
+                    'url' => 'https://soneium.blockscout.com',
+                ],
+                'rpc' => [
+                    'url' => 'https://rpc.soneium.org',
+                ],
+                'contracts' => [
+                    'position_manager' => \App\Constants\Contract::SONEIUM_POSITION_MANAGER,
+                    'factory' => \App\Constants\Contract::SONEIUM_CL_FACTORY,
+                    'gauges' => \App\Constants\Contract::SONEIUM_GAUGES,
+                ],
+            ],
+            'ink' => [
+                'enabled' => false,
+                'chain_id' => \App\Constants\Contract::INK_CHAIN_ID,
+                'price_chain' => 'ink',
+                'position_history' => [
+                    'type' => 'blockscout',
+                    'url' => 'https://explorer.inkonchain.com',
+                ],
+                'rpc' => [
+                    'url' => 'https://rpc-gel.inkonchain.com',
+                ],
+                'contracts' => [
+                    'position_manager' => \App\Constants\Contract::INK_POSITION_MANAGER,
+                    'factory' => \App\Constants\Contract::INK_CL_FACTORY,
+                    'gauges' => \App\Constants\Contract::INK_GAUGES,
+                ],
+            ],
+        ],
+    ];
+}
+
+/**
+ * Build sendNotify2 function from environment variables (Vercel mode).
+ */
+function buildSendNotify2(): callable
+{
+    $botApiKey = getenv('TELEGRAM_BOT_TOKEN');
+    $chatId = getenv('TELEGRAM_CHAT_ID');
+    
+    if ($botApiKey === false || $botApiKey === '') {
+        throw new \RuntimeException('TELEGRAM_BOT_TOKEN environment variable is required');
+    }
+    
+    if ($chatId === false || $chatId === '') {
+        throw new \RuntimeException('TELEGRAM_CHAT_ID environment variable is required');
+    }
+    
+    return function(string $msg) use ($botApiKey, $chatId): string|false {
+        $ch = curl_init('https://api.telegram.org/bot' . $botApiKey . '/sendMessage');
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => [
+                'chat_id' => $chatId,
+                'text' => $msg,
+                'parse_mode' => 'HTML',
+            ],
+            CURLOPT_RETURNTRANSFER => true,
+        ]);
+        $result = curl_exec($ch);
+        curl_close($ch);
+        return $result;
+    };
+}
+
 /**
  * Create appropriate StateStore based on runtime mode.
  */
@@ -88,17 +217,30 @@ function createStateStore(string $runtimeMode, string $stateDirectory): StateSto
     return new LocalFileStateStore($stateDirectory);
 }
 
+// Load config based on mode
+if ($runtimeMode === 'vercel') {
+    $config = buildConfigFromEnv();
+    $sendNotify2 = buildSendNotify2();
+} else {
+    // Server mode: use local config files
+    require_once __DIR__ . '/../../config/config_tg1.php';
+    $config = require __DIR__ . '/../../config/config.php';
+    $sendNotify2 = null; // sendNotify2 is defined in config_tg1.php
+}
+
+$stateStore = createStateStore($runtimeMode, $stateDirectory);
+$notificationsEnabled = filter_var(
+    getenv('NOTIFICATIONS_ENABLED') ?: 'true',
+    FILTER_VALIDATE_BOOL
+);
+$priceService = new DefiLlamaPriceService();
+
 /**
  * Run monitor and return results.
  */
-function runMonitor(string $stateDirectory, StateStoreInterface $stateStore): array
+function runMonitor(array $config, string $stateDirectory, StateStoreInterface $stateStore, bool $notificationsEnabled, callable $sendNotify2): array
 {
-    $config = require __DIR__ . '/../../config/config.php';
-    $notificationsEnabled = filter_var(
-        getenv('NOTIFICATIONS_ENABLED') ?: 'true',
-        FILTER_VALIDATE_BOOL
-    );
-    $priceService = new DefiLlamaPriceService();
+    global $priceService;
     
     $result = [
         'positionsChecked' => 0,
@@ -267,7 +409,7 @@ function runMonitor(string $stateDirectory, StateStoreInterface $stateStore): ar
                         $rewardLine = 'Reward ' . number_format($earnedAmount, 2) . ' ' . Token::symbol($rewardTokenAddress)
                             . ' (' . ($rewardPrice === null ? 'Price unavailable' : '~$' . number_format($earnedAmount * $rewardPrice, 2)) . ')';
                         
-                        sendNotify2(sprintf(
+                        $sendNotify2(sprintf(
                             "Out of range: [%s] %s%s%sCurrent Value: %s%s%s%s",
                             strtoupper($chainName),
                             $tokenPair,
@@ -297,14 +439,8 @@ function runMonitor(string $stateDirectory, StateStoreInterface $stateStore): ar
 }
 
 // Main execution
-validateCronAuth();
-
-$runtimeMode = getenv('RUNTIME_MODE') ?: 'server';
-$stateDirectory = __DIR__ . '/../../state';
-$stateStore = createStateStore($runtimeMode, $stateDirectory);
-
 try {
-    $result = runMonitor($stateDirectory, $stateStore);
+    $result = runMonitor($config, $stateDirectory, $stateStore, $notificationsEnabled, $sendNotify2);
     
     jsonResponse(200, [
         'status' => 'success',
