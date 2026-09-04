@@ -4,6 +4,16 @@ declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
 
+require_once __DIR__ . '/../../vendor/autoload.php';
+
+use App\Exceptions\StateStoreUnavailableException;
+use App\Services\CronAuthenticator;
+use App\Services\CronHealthCheck;
+use App\Services\DefiLlamaPriceService;
+use App\Services\MonitorConfigFactory;
+use App\Services\MonitorRunner;
+use App\Services\UpstashRedisStateStore;
+
 function jsonResponse(int $status, array $data): never
 {
     http_response_code($status);
@@ -14,43 +24,30 @@ function jsonResponse(int $status, array $data): never
 function validateCronAuth(): void
 {
     $expectedSecret = getenv('CRON_SECRET');
+    $result = (new CronAuthenticator())->validate(
+        $expectedSecret === false ? null : $expectedSecret,
+        $_SERVER['HTTP_AUTHORIZATION'] ?? ''
+    );
 
-    if ($expectedSecret === false || $expectedSecret === '') {
-        jsonResponse(500, [
-            'status' => 'error',
-            'positionsChecked' => 0,
-            'alertsSent' => 0,
-            'runtimeMode' => 'vercel',
-            'stateBackend' => 'upstash',
-            'errors' => ['CRON_SECRET is not configured.'],
-        ]);
-    }
-
-    $authorization = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-
-    if (!str_starts_with($authorization, 'Bearer ')
-        || !hash_equals($expectedSecret, substr($authorization, 7))
-    ) {
-        jsonResponse(401, [
-            'status' => 'error',
-            'positionsChecked' => 0,
-            'alertsSent' => 0,
-            'runtimeMode' => 'vercel',
-            'stateBackend' => 'upstash',
-            'errors' => ['Unauthorized.'],
-        ]);
+    if ($result['statusCode'] !== 200) {
+        jsonResponse($result['statusCode'], $result['body']);
     }
 }
 
 validateCronAuth();
 
-require_once __DIR__ . '/../../vendor/autoload.php';
+if (($_GET['health'] ?? null) === '1') {
+    $healthCheck = new CronHealthCheck(
+        static fn (): array => MonitorConfigFactory::fromEnvironment(),
+        static function (): void {
+            $stateStore = new UpstashRedisStateStore();
+            $stateStore->assertAvailable();
+        }
+    );
+    $healthResult = $healthCheck->check();
 
-use App\Exceptions\StateStoreUnavailableException;
-use App\Services\DefiLlamaPriceService;
-use App\Services\MonitorConfigFactory;
-use App\Services\MonitorRunner;
-use App\Services\UpstashRedisStateStore;
+    jsonResponse($healthResult['statusCode'], $healthResult['body']);
+}
 
 function buildTelegramNotifier(): callable
 {
