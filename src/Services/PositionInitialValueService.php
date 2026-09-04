@@ -18,7 +18,8 @@ class PositionInitialValueService
         private RpcService $rpc,
         private DefiLlamaPriceService $priceService,
         private string $cacheDirectory,
-        private ?ClientInterface $client = null
+        private ?ClientInterface $client = null,
+        private bool $persistentCache = true
     ) {
     }
 
@@ -44,7 +45,7 @@ class PositionInitialValueService
             return $this->values[$key];
         }
 
-        $cachedValue = $this->readCachedValue($key);
+        $cachedValue = $this->persistentCache ? $this->readCachedValue($key) : null;
 
         if ($cachedValue !== null) {
             return $this->values[$key] = $cachedValue;
@@ -64,9 +65,11 @@ class PositionInitialValueService
                 );
 
                 if ($initialValue !== null) {
-                    try {
-                        $this->writeCachedValue($key, $initialValue);
-                    } catch (\Throwable) {
+                    if ($this->persistentCache) {
+                        try {
+                            $this->writeCachedValue($key, $initialValue);
+                        } catch (\Throwable) {
+                        }
                     }
 
                     return $this->values[$key] = $initialValue;
@@ -84,6 +87,10 @@ class PositionInitialValueService
 
     public function removeMissingPositionCaches(int $chainId, array $stakedPositionKeys): void
     {
+        if (!$this->persistentCache) {
+            return;
+        }
+
         foreach (glob($this->cacheDirectory . DIRECTORY_SEPARATOR . $chainId . '-*.initial-value.json') ?: [] as $path) {
             $key = basename($path, '.initial-value.json');
 

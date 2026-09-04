@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Contracts\StateStoreInterface;
+use App\Exceptions\StateStoreUnavailableException;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 
@@ -29,19 +30,18 @@ class UpstashRedisStateStore implements StateStoreInterface
         $this->client = $client ?? new Client(['timeout' => 10]);
 
         if ($this->restUrl === '' || $this->restToken === '') {
-            throw new \RuntimeException(
-                'Upstash Redis environment variables are not configured. '
-                . 'UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN are required.'
+            throw new StateStoreUnavailableException(
+                'Upstash Redis environment variables are not configured.'
             );
         }
     }
 
     public function exists(string $key): bool
     {
-        $response = $this->executeCommand(['GET' => self::KEY_PREFIX . $key]);
+        $response = $this->executeCommand(['GET', self::KEY_PREFIX . $key]);
 
-        if (!isset($response['result'])) {
-            throw new \RuntimeException('Invalid Upstash Redis response for EXISTS');
+        if (!array_key_exists('result', $response)) {
+            throw new StateStoreUnavailableException('Invalid response from the state backend.');
         }
 
         return $response['result'] !== null;
@@ -49,22 +49,28 @@ class UpstashRedisStateStore implements StateStoreInterface
 
     public function write(string $key, string $content): void
     {
-        $response = $this->executeCommand([
-            'SET' => self::KEY_PREFIX . $key,
-            'value' => $content,
-        ]);
+        $response = $this->executeCommand(['SET', self::KEY_PREFIX . $key, $content]);
 
-        if (!isset($response['result'])) {
-            throw new \RuntimeException('Invalid Upstash Redis response for SET');
+        if (($response['result'] ?? null) !== 'OK') {
+            throw new StateStoreUnavailableException('Unable to write to the state backend.');
         }
     }
 
     public function delete(string $key): void
     {
-        $response = $this->executeCommand(['DEL' => self::KEY_PREFIX . $key]);
+        $response = $this->executeCommand(['DEL', self::KEY_PREFIX . $key]);
 
-        if (!isset($response['result'])) {
-            throw new \RuntimeException('Invalid Upstash Redis response for DEL');
+        if (!array_key_exists('result', $response) || !is_int($response['result'])) {
+            throw new StateStoreUnavailableException('Unable to delete from the state backend.');
+        }
+    }
+
+    public function assertAvailable(): void
+    {
+        $response = $this->executeCommand(['PING']);
+
+        if (($response['result'] ?? null) !== 'PONG') {
+            throw new StateStoreUnavailableException('State backend is unavailable.');
         }
     }
 
@@ -85,19 +91,19 @@ class UpstashRedisStateStore implements StateStoreInterface
             $body = (string) $response->getBody();
             $result = json_decode($body, true);
 
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                throw new \RuntimeException('Invalid JSON response from Upstash Redis');
+            if (json_last_error() !== JSON_ERROR_NONE || !is_array($result)) {
+                throw new StateStoreUnavailableException('Invalid response from the state backend.');
             }
 
             if (isset($result['error'])) {
-                throw new \RuntimeException('Upstash Redis command failed');
+                throw new StateStoreUnavailableException('State backend command failed.');
             }
 
             return $result;
-        } catch (\GuzzleHttp\Exception\GuzzleException $e) {
-            throw new \RuntimeException(
-                'Failed to communicate with Upstash Redis. State backend unavailable.'
-            );
+        } catch (StateStoreUnavailableException $exception) {
+            throw $exception;
+        } catch (\Throwable $exception) {
+            throw new StateStoreUnavailableException('State backend is unavailable.', 0, $exception);
         }
     }
 }
