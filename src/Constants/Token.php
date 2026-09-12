@@ -19,6 +19,7 @@ class Token
         '0x94b008aa00579c1307b0ef2c499ad98a8ce58e58' => 'USDT',
         '0x9560e827af36c94d2ac33a39bce1fe78631088db' => 'VELO',
         '0x68f180fcce6836688e9084f035309e29bf0a2095' => 'WBTC',
+        '0xc55e93c62874d8100dbd2dfe307edc1036ad5434' => 'mooBIFI',
 
         // Celo
         '0x471ece3750da237f93b8e339c536989b8978a438' => 'CELO',

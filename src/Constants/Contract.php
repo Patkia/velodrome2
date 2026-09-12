@@ -63,6 +63,11 @@ class Contract
             'position_manager' => self::POSITION_MANAGER_V2,
             'factory' => self::CL_FACTORY_V2,
         ],
+        'USDC/mooBIFI CL200' => [
+            'address' => '0x41160e66fcaa10cbb148ace60bc2a22d609ec519',
+            'position_manager' => self::POSITION_MANAGER_V2,
+            'factory' => self::CL_FACTORY_V2,
+        ],
         'USDC/WBTC CL50 V1' => '0xa18911b77e905602b7cb3824c3712cbb7e1a3534',
         'USDC/WBTC CL100 V1' => '0xa6d2a82e14774916574dcca3ac92b33b1b64552b',
         'USDC/WBTC CL100 V2' => [
