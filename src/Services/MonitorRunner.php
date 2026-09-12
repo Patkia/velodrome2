@@ -174,6 +174,7 @@ class MonitorRunner
         $token0Symbol = Token::symbol($position['token0']);
         $token1Symbol = Token::symbol($position['token1']);
         $tokenLines = [];
+        $tokens = [];
         $positionValue = null;
 
         try {
@@ -194,6 +195,10 @@ class MonitorRunner
             $tokenLines = [
                 $this->formatTokenLine($tokenAmounts['token0'], $token0Symbol, $token0Price),
                 $this->formatTokenLine($tokenAmounts['token1'], $token1Symbol, $token1Price),
+            ];
+            $tokens = [
+                $this->structuredToken($tokenAmounts['token0'], $token0Symbol, $token0Price),
+                $this->structuredToken($tokenAmounts['token1'], $token1Symbol, $token1Price),
             ];
         } catch (\Throwable) {
             $token0Price = null;
@@ -225,6 +230,12 @@ class MonitorRunner
                 ($positionValue >= $initialValue ? '+' : '-')
                     . number_format(abs(($positionValue - $initialValue) / $initialValue * 100), 2)
             );
+        $profitLossValue = $initialValue === null || $positionValue === null
+            ? null
+            : $positionValue - $initialValue;
+        $profitLossPercent = $profitLossValue === null || $initialValue <= 0
+            ? null
+            : $profitLossValue / $initialValue * 100;
         $rewardLine = $this->getRewardLine($gaugeContract, $erc20Contract, $gauge, $positionId, $chain['price_chain']);
 
         $result['positions'][] = [
@@ -237,6 +248,14 @@ class MonitorRunner
             'tokenLines' => $tokenLines,
             'reward' => $rewardLine,
             'inRange' => $inRange,
+            'pair' => $tokenPair,
+            'status' => $inRange ? 'in-range' : 'out-of-range',
+            'tokens' => $tokens,
+            'currentValueUsd' => $positionValue,
+            'initialValueUsd' => $initialValue,
+            'profitLossUsd' => $profitLossValue,
+            'profitLossPercent' => $profitLossPercent,
+            'rewards' => $rewardLine,
         ];
 
         if ($this->stateStore === null) {
@@ -356,6 +375,19 @@ class MonitorRunner
 
         return number_format($amount, $precision, '.', ',') . ' ' . $symbol
             . ' (' . ($price === null ? 'Price unavailable' : '~$' . number_format($amount * $price, 2)) . ')';
+    }
+
+    private function structuredToken(float $amount, string $symbol, ?float $price): array
+    {
+        $precision = $symbol === 'WBTC' ? 8 : 2;
+        $valueUsd = $price === null ? null : $amount * $price;
+
+        return [
+            'symbol' => $symbol,
+            'amount' => number_format($amount, $precision, '.', ','),
+            'value' => $valueUsd === null ? 'Price unavailable' : '~$' . number_format($valueUsd, 2),
+            'valueUsd' => $valueUsd,
+        ];
     }
 
     private static function stateKey(int $chainId, string $positionManagerAddress, int $positionId): string

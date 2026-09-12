@@ -21,6 +21,10 @@
       "dest": "/api/web-monitor.php"
     },
     {
+      "src": "/api/site/positions",
+      "dest": "/api/site/positions.php"
+    },
+    {
       "src": "/api/cron/monitor",
       "dest": "/api/cron/monitor.php"
     }
